@@ -3,196 +3,194 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detektor Gerakan Layar Penuh</title>
-    <!-- Memuat Tailwind CSS untuk styling UI -->
+    <title>Detektor Gerakan Akurat & Andal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Menghilangkan margin dan scrollbar dari body */
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #000;
-        }
-
-        /* Styling untuk elemen video agar fullscreen */
-        #video {
-            position: fixed;
-            top: 0;
-            left: 0;
-            min-width: 100%;
-            min-height: 100%;
-            width: auto;
-            height: auto;
-            z-index: 1; /* Lapisan paling bawah */
-            transform: scaleX(-1); /* Efek cermin */
-            object-fit: cover; /* Memastikan video menutupi layar tanpa distorsi */
-        }
-
-        /* Styling untuk canvas overlay agar fullscreen */
-        #canvas {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 2; /* Di atas video */
-        }
-
-        /* Styling untuk kontainer UI */
-        #ui-container {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            z-index: 3; /* Lapisan paling atas */
-            background: rgba(0, 0, 0, 0.5); /* Latar belakang semi-transparan */
-            padding: 1rem;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 0.5rem;
-            transition: opacity 0.3s ease-in-out;
-        }
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #video { position: fixed; top: 0; left: 0; min-width: 100%; min-height: 100%; width: auto; height: auto; z-index: 1; transform: scaleX(-1); object-fit: cover; }
+        #canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; }
+        #ui-container { position: fixed; bottom: 0; left: 0; width: 100%; z-index: 3; background: rgba(0, 0, 0, 0.5); padding: 1rem; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; align-items: center; justify-content: center; background-color: rgba(10, 20, 30, 0.8); backdrop-filter: blur(8px); }
     </style>
 </head>
 <body>
 
-    <!-- Elemen video akan menjadi latar belakang layar penuh -->
+    <!-- 1. Modal Persetujuan Awal -->
+    <div id="consent-modal" class="modal">
+        <div class="bg-gray-800 text-white p-8 rounded-xl shadow-2xl max-w-md w-11/12 text-center border border-gray-700">
+            <div class="flex justify-center items-center mb-4">
+                <svg class="w-12 h-12 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-4 text-cyan-400">Persetujuan Penggunaan Kamera</h2>
+            <p class="mb-6 text-gray-300">Aplikasi ini memproses video langsung dari kamera Anda untuk mendeteksi gerakan. <strong class="text-yellow-400">Seluruh pemrosesan 100% terjadi di perangkat Anda.</strong> Tidak ada data gambar atau video yang disimpan atau dikirim ke mana pun.</p>
+            <button id="agree-button" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105">Saya Mengerti & Izinkan Kamera</button>
+        </div>
+    </div>
+
+    <!-- 2. Modal Jika Akses Ditolak -->
+    <div id="denied-modal" class="modal hidden">
+        <div class="bg-red-900 bg-opacity-80 border border-red-700 text-white p-8 rounded-xl shadow-2xl max-w-md w-11/12 text-center">
+             <div class="flex justify-center items-center mb-4">
+                <svg class="w-12 h-12 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
+            </div>
+            <h2 class="text-2xl font-bold mb-4 text-red-400">Akses Kamera Ditolak</h2>
+            <p class="mb-6 text-gray-200">Anda telah menolak izin akses kamera. Aplikasi ini tidak dapat berfungsi tanpanya. Silakan izinkan akses kamera di pengaturan browser Anda atau klik coba lagi.</p>
+            <button id="retry-button" class="w-full bg-yellow-500 hover:bg-yellow-600 text-black font-bold py-3 px-6 rounded-lg transition-transform transform hover:scale-105">Coba Lagi</button>
+        </div>
+    </div>
+
+    <!-- Elemen Aplikasi Utama -->
     <video id="video" playsinline autoplay muted></video>
-
-    <!-- Canvas digunakan sebagai lapisan transparan untuk menyorot gerakan -->
-    <canvas id="canvas"></canvas>
-
-    <!-- Kontainer untuk semua elemen Antarmuka Pengguna (UI) -->
-    <div id="ui-container">
-        <h1 id="status" class="text-xl sm:text-2xl font-bold text-white text-center">Memulai kamera...</h1>
+    <canvas id="canvas" class="hidden"></canvas>
+    <div id="ui-container" class="hidden">
+        <h1 id="status" class="text-xl sm:text-2xl font-bold text-white text-center">Memulai...</h1>
         <div class="w-full max-w-sm text-center">
             <label for="sensitivity" class="block mb-1 text-sm font-medium text-gray-300">Sensitivitas</label>
-            <input type="range" id="sensitivity" min="20" max="100" value="50" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+            <input type="range" id="sensitivity" min="10" max="50" value="25" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
         </div>
     </div>
 
     <script>
-        // Mengambil elemen-elemen dari DOM
+        // Elemen DOM
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const uiContainer = document.getElementById('ui-container');
         const statusText = document.getElementById('status');
         const sensitivitySlider = document.getElementById('sensitivity');
-        const uiContainer = document.getElementById('ui-container');
+        const consentModal = document.getElementById('consent-modal');
+        const agreeButton = document.getElementById('agree-button');
+        const deniedModal = document.getElementById('denied-modal');
+        const retryButton = document.getElementById('retry-button');
 
-        // Membuat canvas tersembunyi untuk pemrosesan gambar
-        const offscreenCanvas = document.createElement('canvas');
-        const offscreenCtx = offscreenCanvas.getContext('2d');
+        // Pengaturan Akurasi
+        const PIXEL_STEP = 5; // Hanya proses setiap 5x5 piksel, sangat meningkatkan performa & mengurangi noise.
+        let motionThreshold = 20; // Ambang batas perbedaan kecerahan (0-255)
 
-        // Variabel untuk logika deteksi gerakan
-        let lastImageData;
-        const motionThreshold = 25; // Ambang batas perbedaan piksel (0-255)
+        // State
+        let lastGrayscaleData;
         let videoReady = false;
 
-        // Fungsi utama untuk inisialisasi
-        async function init() {
+        // Fungsi untuk memulai kamera
+        async function startCamera() {
             try {
-                // 1. Meminta akses ke kamera pengguna
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user' }, // Menggunakan kamera depan
-                    audio: false
-                });
-                
-                // 2. Jika berhasil, hubungkan stream ke elemen video
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
                 video.srcObject = stream;
                 
-                // 3. Mulai loop deteksi setelah video siap diputar
-                video.addEventListener('loadeddata', () => {
-                    // Atur ukuran canvas sesuai dengan ukuran jendela
+                // Sembunyikan modal penolakan jika sebelumnya muncul
+                deniedModal.classList.add('hidden');
+                statusText.textContent = "Kamera terdeteksi, memulai analisis...";
+
+                video.onloadeddata = () => {
                     canvas.width = window.innerWidth;
                     canvas.height = window.innerHeight;
-                    
-                    // Atur ukuran canvas tersembunyi sesuai video
-                    offscreenCanvas.width = video.videoWidth;
-                    offscreenCanvas.height = video.videoHeight;
-
                     videoReady = true;
                     statusText.textContent = "Arahkan kamera untuk mendeteksi gerakan";
                     requestAnimationFrame(detectionLoop);
-                });
+                };
 
             } catch (err) {
-                // Tangani error jika pengguna menolak akses kamera
-                console.error("Error mengakses kamera: ", err);
-                statusText.innerHTML = "Akses kamera ditolak. <br> Mohon segarkan halaman dan berikan izin.";
-                statusText.classList.add('text-red-500');
+                console.error("Error akses kamera:", err);
+                // Tampilkan modal penolakan yang informatif
+                uiContainer.classList.add('hidden');
+                canvas.classList.add('hidden');
+                deniedModal.classList.remove('hidden');
             }
         }
 
-        // Loop utama untuk deteksi
+        // --- Event Listeners ---
+        agreeButton.addEventListener('click', () => {
+            consentModal.style.display = 'none';
+            canvas.classList.remove('hidden');
+            uiContainer.classList.remove('hidden');
+            startCamera();
+        });
+
+        retryButton.addEventListener('click', () => {
+            deniedModal.classList.add('hidden');
+            startCamera();
+        });
+        
+        sensitivitySlider.addEventListener('input', (e) => {
+            // Slider value dibalik: nilai rendah = lebih sensitif
+            motionThreshold = 51 - e.target.value; 
+        });
+
+        // --- Loop Deteksi Utama (Logika Inti) ---
         function detectionLoop() {
             if (!videoReady) {
                 requestAnimationFrame(detectionLoop);
                 return;
             }
 
-            // 1. Gambar frame video ke canvas tersembunyi
-            offscreenCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
-            const currentImageData = offscreenCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            const videoWidth = video.videoWidth;
+            const videoHeight = video.videoHeight;
+            
+            // Buat canvas tersembunyi jika ukurannya berubah
+            if (!ctx.canvas.width || ctx.canvas.width !== videoWidth) {
+                 ctx.canvas.width = videoWidth;
+                 ctx.canvas.height = videoHeight;
+            }
 
-            // 2. Bersihkan canvas yang terlihat
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // 1. Gambar video ke canvas (bisa tersembunyi) untuk analisis
+            ctx.drawImage(video, 0, 0, videoWidth, videoHeight);
+            const currentImageData = ctx.getImageData(0, 0, videoWidth, videoHeight);
+            const data = currentImageData.data;
+            const currentGrayscaleData = new Uint8Array(videoWidth * videoHeight);
 
-            if (lastImageData) {
+            // 2. Konversi ke Grayscale & Downsampling
+            for (let y = 0; y < videoHeight; y++) {
+                for (let x = 0; x < videoWidth; x++) {
+                    const i = (y * videoWidth + x) * 4;
+                    // Rumus standar konversi ke grayscale (berdasarkan persepsi mata manusia)
+                    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                    currentGrayscaleData[y * videoWidth + x] = gray;
+                }
+            }
+            
+            // Bersihkan canvas yang terlihat oleh user
+            const displayCtx = document.getElementById('canvas').getContext('2d');
+            displayCtx.clearRect(0, 0, displayCtx.canvas.width, displayCtx.canvas.height);
+
+            if (lastGrayscaleData) {
                 let motionPixels = 0;
-                
-                const data = currentImageData.data;
-                const lastData = lastImageData.data;
+                // 3. Bandingkan frame (dengan downsampling)
+                for (let y = 0; y < videoHeight; y += PIXEL_STEP) {
+                    for (let x = 0; x < videoWidth; x += PIXEL_STEP) {
+                        const i = y * videoWidth + x;
+                        const diff = Math.abs(currentGrayscaleData[i] - lastGrayscaleData[i]);
 
-                // 3. Loop melalui data piksel untuk membandingkan
-                for (let i = 0; i < data.length; i += 4) {
-                    const avgCurrent = (data[i] + data[i + 1] + data[i + 2]) / 3;
-                    const avgLast = (lastData[i] + lastData[i + 1] + lastData[i + 2]) / 3;
-                    const diff = Math.abs(avgCurrent - avgLast);
-
-                    if (diff > motionThreshold) {
-                        motionPixels++;
-                        // 4. Gambar sorotan gerakan di canvas yang terlihat
-                        // Koordinat piksel di gambar
-                        const x = (i / 4) % offscreenCanvas.width;
-                        const y = Math.floor((i / 4) / offscreenCanvas.width);
-                        
-                        // Konversi koordinat ke ukuran canvas layar penuh
-                        const displayX = (offscreenCanvas.width - x - 1) * (canvas.width / offscreenCanvas.width);
-                        const displayY = y * (canvas.height / offscreenCanvas.height);
-
-                        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
-                        ctx.fillRect(displayX, displayY, 4, 4); // Gambar kotak kecil untuk menyorot gerakan
+                        if (diff > motionThreshold) {
+                            motionPixels++;
+                            // 4. Visualisasikan gerakan
+                            const displayX = (videoWidth - x - 1) * (displayCtx.canvas.width / videoWidth);
+                            const displayY = y * (displayCtx.canvas.height / videoHeight);
+                            displayCtx.fillStyle = 'rgba(255, 255, 0, 0.5)'; // Kuning untuk visibilitas lebih baik
+                            displayCtx.fillRect(displayX, displayY, PIXEL_STEP * 2, PIXEL_STEP * 2);
+                        }
                     }
                 }
                 
-                const motionSensitivity = (101 - sensitivitySlider.value) * 10;
-                
-                if (motionPixels > motionSensitivity) {
-                    statusText.textContent = "GERAKAN TERDETEKSI!";
+                const motionSensitivityFactor = (videoWidth * videoHeight) / (PIXEL_STEP * PIXEL_STEP);
+                if (motionPixels > motionSensitivityFactor * 0.01) { // Deteksi jika >1% piksel sampel bergerak
+                    statusText.textContent = "GERAKAN TERDETEKSI";
                     statusText.classList.add('text-yellow-400');
                 } else {
-                    statusText.textContent = "Tidak ada gerakan";
+                    statusText.textContent = "Tidak ada gerakan signifikan";
                     statusText.classList.remove('text-yellow-400');
                 }
             }
             
-            // 5. Simpan data gambar untuk frame berikutnya
-            lastImageData = currentImageData;
-
+            lastGrayscaleData = currentGrayscaleData;
             requestAnimationFrame(detectionLoop);
         }
 
-        // Menyesuaikan ukuran canvas saat jendela diubah ukurannya
         window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            const displayCanvas = document.getElementById('canvas');
+            displayCanvas.width = window.innerWidth;
+            displayCanvas.height = window.innerHeight;
         });
 
-        // Panggil fungsi inisialisasi saat halaman dimuat
-        init();
     </script>
 </body>
 </html>
