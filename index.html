@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detektor Gerakan Layar Penuh</title>
+    <!-- Memuat Tailwind CSS untuk styling UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Menghilangkan margin dan scrollbar dari body */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        /* Styling untuk elemen video agar fullscreen */
+        #video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            z-index: 1; /* Lapisan paling bawah */
+            transform: scaleX(-1); /* Efek cermin */
+            object-fit: cover; /* Memastikan video menutupi layar tanpa distorsi */
+        }
+
+        /* Styling untuk canvas overlay agar fullscreen */
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2; /* Di atas video */
+        }
+
+        /* Styling untuk kontainer UI */
+        #ui-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            z-index: 3; /* Lapisan paling atas */
+            background: rgba(0, 0, 0, 0.5); /* Latar belakang semi-transparan */
+            padding: 1rem;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            transition: opacity 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Elemen video akan menjadi latar belakang layar penuh -->
+    <video id="video" playsinline autoplay muted></video>
+
+    <!-- Canvas digunakan sebagai lapisan transparan untuk menyorot gerakan -->
+    <canvas id="canvas"></canvas>
+
+    <!-- Kontainer untuk semua elemen Antarmuka Pengguna (UI) -->
+    <div id="ui-container">
+        <h1 id="status" class="text-xl sm:text-2xl font-bold text-white text-center">Memulai kamera...</h1>
+        <div class="w-full max-w-sm text-center">
+            <label for="sensitivity" class="block mb-1 text-sm font-medium text-gray-300">Sensitivitas</label>
+            <input type="range" id="sensitivity" min="20" max="100" value="50" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+        </div>
+    </div>
+
+    <script>
+        // Mengambil elemen-elemen dari DOM
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusText = document.getElementById('status');
+        const sensitivitySlider = document.getElementById('sensitivity');
+        const uiContainer = document.getElementById('ui-container');
+
+        // Membuat canvas tersembunyi untuk pemrosesan gambar
+        const offscreenCanvas = document.createElement('canvas');
+        const offscreenCtx = offscreenCanvas.getContext('2d');
+
+        // Variabel untuk logika deteksi gerakan
+        let lastImageData;
+        const motionThreshold = 25; // Ambang batas perbedaan piksel (0-255)
+        let videoReady = false;
+
+        // Fungsi utama untuk inisialisasi
+        async function init() {
+            try {
+                // 1. Meminta akses ke kamera pengguna
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user' }, // Menggunakan kamera depan
+                    audio: false
+                });
+                
+                // 2. Jika berhasil, hubungkan stream ke elemen video
+                video.srcObject = stream;
+                
+                // 3. Mulai loop deteksi setelah video siap diputar
+                video.addEventListener('loadeddata', () => {
+                    // Atur ukuran canvas sesuai dengan ukuran jendela
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                    
+                    // Atur ukuran canvas tersembunyi sesuai video
+                    offscreenCanvas.width = video.videoWidth;
+                    offscreenCanvas.height = video.videoHeight;
+
+                    videoReady = true;
+                    statusText.textContent = "Arahkan kamera untuk mendeteksi gerakan";
+                    requestAnimationFrame(detectionLoop);
+                });
+
+            } catch (err) {
+                // Tangani error jika pengguna menolak akses kamera
+                console.error("Error mengakses kamera: ", err);
+                statusText.innerHTML = "Akses kamera ditolak. <br> Mohon segarkan halaman dan berikan izin.";
+                statusText.classList.add('text-red-500');
+            }
+        }
+
+        // Loop utama untuk deteksi
+        function detectionLoop() {
+            if (!videoReady) {
+                requestAnimationFrame(detectionLoop);
+                return;
+            }
+
+            // 1. Gambar frame video ke canvas tersembunyi
+            offscreenCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            const currentImageData = offscreenCtx.getImageData(0, 0, offscreenCanvas.width, offscreenCanvas.height);
+
+            // 2. Bersihkan canvas yang terlihat
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (lastImageData) {
+                let motionPixels = 0;
+                
+                const data = currentImageData.data;
+                const lastData = lastImageData.data;
+
+                // 3. Loop melalui data piksel untuk membandingkan
+                for (let i = 0; i < data.length; i += 4) {
+                    const avgCurrent = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                    const avgLast = (lastData[i] + lastData[i + 1] + lastData[i + 2]) / 3;
+                    const diff = Math.abs(avgCurrent - avgLast);
+
+                    if (diff > motionThreshold) {
+                        motionPixels++;
+                        // 4. Gambar sorotan gerakan di canvas yang terlihat
+                        // Koordinat piksel di gambar
+                        const x = (i / 4) % offscreenCanvas.width;
+                        const y = Math.floor((i / 4) / offscreenCanvas.width);
+                        
+                        // Konversi koordinat ke ukuran canvas layar penuh
+                        const displayX = (offscreenCanvas.width - x - 1) * (canvas.width / offscreenCanvas.width);
+                        const displayY = y * (canvas.height / offscreenCanvas.height);
+
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                        ctx.fillRect(displayX, displayY, 4, 4); // Gambar kotak kecil untuk menyorot gerakan
+                    }
+                }
+                
+                const motionSensitivity = (101 - sensitivitySlider.value) * 10;
+                
+                if (motionPixels > motionSensitivity) {
+                    statusText.textContent = "GERAKAN TERDETEKSI!";
+                    statusText.classList.add('text-yellow-400');
+                } else {
+                    statusText.textContent = "Tidak ada gerakan";
+                    statusText.classList.remove('text-yellow-400');
+                }
+            }
+            
+            // 5. Simpan data gambar untuk frame berikutnya
+            lastImageData = currentImageData;
+
+            requestAnimationFrame(detectionLoop);
+        }
+
+        // Menyesuaikan ukuran canvas saat jendela diubah ukurannya
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        // Panggil fungsi inisialisasi saat halaman dimuat
+        init();
+    </script>
+</body>
+</html>
+
