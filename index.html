@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Deteksi Cerdas v5 (Integrasi Gemini)</title>
+    <title>Sistem Deteksi Cerdas v5.1 (Mirror & Error Fix)</title>
     <!-- Library AI -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
@@ -11,6 +11,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: 'Inter', sans-serif; }
+        /* Cerminkan elemen video agar natural bagi pengguna */
         #video { transform: scaleX(-1); object-fit: cover; }
         #canvas { position: absolute; top: 0; left: 0; image-rendering: pixelated; cursor: default; }
         .loader-modal { backdrop-filter: blur(10px); transition: opacity 0.5s ease-out; }
@@ -25,7 +26,9 @@
         .toggle-checkbox:checked { right: 0; border-color: #14b8a6; }
         .toggle-checkbox:checked + .toggle-label { background-color: #14b8a6; box-shadow: 0 0 10px rgba(20, 184, 166, 0.7); }
         .status-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 50% { opacity: .7; } }
+        @keyframes pulse {
+            50% { opacity: .7; }
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
@@ -35,15 +38,13 @@
         <p class="mt-4 text-lg text-center w-3/4">Memuat model AI...</p>
     </div>
 
-    <!-- Modal untuk menampilkan respons Gemini -->
     <div id="gemini-modal" class="gemini-modal fixed inset-0 z-40 hidden items-center justify-center bg-gray-900 bg-opacity-70">
         <div class="bg-gray-800 text-white p-6 rounded-xl shadow-2xl max-w-md w-11/12 border border-teal-500 relative">
             <h3 class="text-xl font-bold mb-4 text-teal-300 flex items-center">
                 <svg class="w-6 h-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>
                 Wawasan dari Gemini AI
             </h3>
-            <div id="gemini-content" class="text-gray-300 leading-relaxed">
-                <!-- Loader di dalam modal -->
+            <div id="gemini-content" class="text-gray-300 leading-relaxed max-h-60 overflow-y-auto">
                 <div id="gemini-loader" class="flex justify-center items-center h-24">
                     <div class="w-8 h-8 border-2 border-teal-400 border-t-transparent rounded-full animate-spin"></div>
                 </div>
@@ -61,9 +62,9 @@
 
     <div id="ui-container" class="fixed top-0 left-0 w-full p-4 z-10 bg-gradient-to-b from-black/70 to-transparent">
         <div class="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-             <div class="flex items-center bg-gray-800 rounded-lg p-1 space-x-1">
+            <div class="flex items-center bg-gray-800 rounded-lg p-1 space-x-1">
                 <button id="mode-object" class="mode-btn px-3 py-2 text-sm font-medium rounded-md btn-active">Deteksi Objek</button>
-             </div>
+            </div>
             <div class="flex items-center space-x-3 bg-gray-800 rounded-lg p-2">
                 <span class="font-medium text-sm text-gray-300">Filter Suhu</span>
                 <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
@@ -92,6 +93,7 @@
         const geminiLoader = document.getElementById('gemini-loader');
         const closeGeminiBtn = document.getElementById('close-gemini-btn');
         
+        // --- Konfigurasi Performa ---
         const DETECTION_INTERVAL_MS = 300;
         const PROCESSING_CANVAS_WIDTH = 160;
 
@@ -100,31 +102,55 @@
         
         let objectModel = null;
         let lastObjectPredictions = [];
-        let clickableObjects = []; // Untuk menyimpan info deteksi yang bisa diklik
         let isThermalModeActive = false;
         let pixelsPerCm = null;
         
         const AVG_FACE_WIDTH_CM = 14.0;
         const animalClasses = ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
         
-        function getCategory(className) { /* ... */ }
+        function getCategory(className) {
+            if (className === 'person') return { name: 'Human', color: '#14b8a6' };
+            if (animalClasses.includes(className)) return { name: 'Animal', color: '#f59e0b' };
+            return { name: 'Equipment', color: '#6366f1' };
+        }
 
-        async function setupCamera() { /* ... */ }
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+            video.srcObject = stream;
+            return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
+        }
         
         // --- Loop Rendering (Visual, 60fps) ---
         function renderLoop() {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            ctx.save();
-            ctx.scale(-1, 1);
-            ctx.translate(-canvas.width, 0);
-
-            if (isThermalModeActive) { /* ... */ } 
-            else { ctx.drawImage(video, 0, 0, canvas.width, canvas.height); }
             
+            // --- PERBAIKAN MIRROR DIMULAI DI SINI ---
+            ctx.save();
+            ctx.scale(-1, 1); // Cerminkan konteks canvas secara horizontal
+            ctx.translate(-canvas.width, 0); // Geser origin kembali ke pojok kiri atas
+
+            // Terapkan filter termal jika aktif
+            if (isThermalModeActive) {
+                const pHeight = Math.round(PROCESSING_CANVAS_WIDTH * (canvas.height / canvas.width));
+                processingCanvas.width = PROCESSING_CANVAS_WIDTH;
+                processingCanvas.height = pHeight;
+                processingCtx.drawImage(video, 0, 0, PROCESSING_CANVAS_WIDTH, pHeight);
+                const imageData = processingCtx.getImageData(0, 0, PROCESSING_CANVAS_WIDTH, pHeight);
+                applyThermalFilter(imageData);
+                processingCtx.putImageData(imageData, 0, 0);
+                ctx.drawImage(processingCanvas, 0, 0, canvas.width, canvas.height);
+            } else {
+                // Tampilan kamera normal
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            }
+            
+            // Gambar kotak deteksi di atas video
             drawObjectPredictions(lastObjectPredictions);
             
-            ctx.restore();
+            ctx.restore(); // Kembalikan konteks canvas ke keadaan normal
+            // --- PERBAIKAN MIRROR SELESAI ---
+
             requestAnimationFrame(renderLoop);
         }
 
@@ -136,7 +162,6 @@
             statusEl.classList.add('status-pulse');
             const predictions = await objectModel.detect(video);
             lastObjectPredictions = predictions;
-            clickableObjects = predictions; // Simpan untuk event klik
             
             const personPrediction = predictions.find(p => p.class === 'person');
             if (personPrediction) {
@@ -145,14 +170,14 @@
             }
         }
 
-        // --- FUNGSI BARU: Memanggil Gemini API ---
+        // --- Fungsi untuk memanggil Gemini API ---
         async function getGeminiInsight(objectClass) {
             geminiModal.classList.remove('hidden');
             geminiModal.classList.add('flex');
             geminiLoader.style.display = 'flex';
-            geminiContent.innerHTML = ''; // Kosongkan konten sebelumnya
+            geminiContent.innerHTML = '';
 
-            const prompt = `Berikan satu fakta menarik atau tips bermanfaat tentang '${objectClass}' dalam Bahasa Indonesia. Jaga agar tetap singkat (1-2 kalimat) dan mudah dimengerti.`;
+            const prompt = `Berikan satu fakta menarik atau tips bermanfaat tentang '${objectClass}' dalam Bahasa Indonesia. Buat dalam satu paragraf singkat.`;
             const apiKey = ""; // Disediakan oleh environment
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
@@ -163,18 +188,12 @@
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
 
-                if (!response.ok) {
-                    throw new Error(`API error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`API error! status: ${response.status}`);
 
                 const result = await response.json();
                 const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
                 
-                if (text) {
-                    geminiContent.innerText = text;
-                } else {
-                    geminiContent.innerText = "Maaf, tidak dapat menemukan wawasan saat ini.";
-                }
+                geminiContent.innerText = text || "Maaf, tidak dapat menemukan wawasan saat ini.";
 
             } catch (error) {
                 console.error("Gemini API call failed:", error);
@@ -185,20 +204,42 @@
         }
 
         function drawObjectPredictions(predictions) {
-            // Ubah cursor jika ada objek yang bisa diklik
             canvas.style.cursor = predictions.length > 0 ? 'pointer' : 'default';
             
-            predictions.forEach(p => { /* ... (fungsi gambar sama seperti sebelumnya) ... */ });
+            predictions.forEach(p => {
+                const [x, y, width, height] = p.bbox;
+                const category = getCategory(p.class);
+                ctx.strokeStyle = category.color;
+                ctx.lineWidth = 4;
+                ctx.strokeRect(x, y, width, height);
+                ctx.fillStyle = category.color;
+                const text = `${category.name} (${Math.round(p.score * 100)}%)`;
+                ctx.font = '16px Inter, sans-serif';
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(x, y - 28, textWidth + 10, 28);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(text, x + 5, y - 8);
+                if (pixelsPerCm) {
+                    const widthCm = (width / pixelsPerCm).toFixed(1);
+                    const heightCm = (height / pixelsPerCm).toFixed(1);
+                    const mText = `Est: ${widthCm}cm x ${heightCm}cm`;
+                    const mWidth = ctx.measureText(mText).width;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillRect(x, y + height, mWidth + 10, 24);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(mText, x + 5, y + height + 17);
+                }
+            });
         }
         
-        // --- Event Listener untuk Klik & Gemini ---
+        // --- Event Listener untuk Klik pada Canvas ---
         canvas.addEventListener('click', (e) => {
             const rect = canvas.getBoundingClientRect();
-            // Koreksi koordinat karena mirror dan scaling
+            // PERBAIKAN KOORDINAT KLIK UNTUK MIRROR
             const clickX = canvas.width - (e.clientX - rect.left) * (canvas.width / rect.width);
             const clickY = (e.clientY - rect.top) * (canvas.height / rect.height);
 
-            const clickedObject = clickableObjects.find(obj => 
+            const clickedObject = lastObjectPredictions.find(obj => 
                 clickX >= obj.bbox[0] && clickX <= obj.bbox[0] + obj.bbox[2] &&
                 clickY >= obj.bbox[1] && clickY <= obj.bbox[1] + obj.bbox[3]
             );
@@ -212,11 +253,26 @@
             geminiModal.classList.add('hidden');
             geminiModal.classList.remove('flex');
         });
-
-        // --- Inisialisasi & Fungsi Lainnya (tetap sama) ---
+        
         thermalToggle.addEventListener('change', (e) => { isThermalModeActive = e.target.checked; });
-        function applyThermalFilter(imageData) { /* ... */ }
-        function mapBrightnessToThermalColor(brightness) { /* ... */ }
+
+        function applyThermalFilter(imageData) {
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                const thermalColor = mapBrightnessToThermalColor(brightness);
+                data[i] = thermalColor.r; data[i+1] = thermalColor.g; data[i+2] = thermalColor.b;
+            }
+        }
+        function mapBrightnessToThermalColor(brightness) {
+            const t = brightness / 255;
+            let r=0, g=0, b=0;
+            if (t < 0.25) { r = 0; g = t * 4 * 255; b = 255; }
+            else if (t < 0.5) { r = (t - 0.25) * 4 * 255; g = 255; b = 255 - r; }
+            else if (t < 0.75) { r = 255; g = 255 - (t - 0.5) * 4 * 255; b = 0; }
+            else { r = 255; g = (t - 0.75) * 4 * 255; b = g; }
+            return { r, g, b };
+        }
 
         async function main() {
             objectModel = await cocoSsd.load();
@@ -227,13 +283,6 @@
             setInterval(runDetectionLoop, DETECTION_INTERVAL_MS);
         }
         
-        // Menambahkan fungsi yang hilang untuk kelengkapan
-        getCategory = function(className) { if (className === 'person') return { name: 'Human', color: '#14b8a6' }; if (animalClasses.includes(className)) return { name: 'Animal', color: '#f59e0b' }; return { name: 'Equipment', color: '#6366f1' }; }
-        setupCamera = async function() { const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false }); video.srcObject = stream; return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); }); }
-        drawObjectPredictions = function(predictions) { canvas.style.cursor = predictions.length > 0 ? 'pointer' : 'default'; predictions.forEach(p => { const [x, y, width, height] = p.bbox; const category = getCategory(p.class); ctx.strokeStyle = category.color; ctx.lineWidth = 4; ctx.strokeRect(x, y, width, height); ctx.fillStyle = category.color; const text = `${category.name} (${Math.round(p.score * 100)}%)`; ctx.font = '16px Inter, sans-serif'; const textWidth = ctx.measureText(text).width; ctx.fillRect(x, y - 28, textWidth + 10, 28); ctx.fillStyle = '#ffffff'; ctx.fillText(text, x + 5, y - 8); if (pixelsPerCm) { const widthCm = (width / pixelsPerCm).toFixed(1); const heightCm = (height / pixelsPerCm).toFixed(1); const mText = `Est: ${widthCm}cm x ${heightCm}cm`; const mWidth = ctx.measureText(mText).width; ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(x, y + height, mWidth + 10, 24); ctx.fillStyle = '#ffffff'; ctx.fillText(mText, x + 5, y + height + 17); } }); }
-        applyThermalFilter = function(imageData) { const data = imageData.data; for (let i = 0; i < data.length; i += 4) { const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3; const thermalColor = mapBrightnessToThermalColor(brightness); data[i] = thermalColor.r; data[i+1] = thermalColor.g; data[i+2] = thermalColor.b; } }
-        mapBrightnessToThermalColor = function(brightness) { const t = brightness / 255; let r=0, g=0, b=0; if (t < 0.25) { r = 0; g = t * 4 * 255; b = 255; } else if (t < 0.5) { r = (t - 0.25) * 4 * 255; g = 255; b = 255 - r; } else if (t < 0.75) { r = 255; g = 255 - (t - 0.5) * 4 * 255; b = 0; } else { r = 255; g = (t - 0.75) * 4 * 255; b = g; } return { r, g, b }; }
-
         main();
     </script>
 </body>
