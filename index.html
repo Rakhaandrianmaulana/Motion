@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistem Deteksi Cerdas & Pengukuran</title>
+    <title>Sistem Deteksi dengan Filter Termal</title>
     <!-- Memuat TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
     <!-- Memuat model deteksi objek COCO-SSD -->
@@ -16,6 +16,9 @@
         #canvas { position: absolute; top: 0; left: 0; }
         .loader-modal { backdrop-filter: blur(10px); }
         .btn-active { background-color: #14b8a6 !important; color: white !important; }
+        /* Styling untuk Toggle Switch */
+        .toggle-checkbox:checked { right: 0; border-color: #14b8a6; }
+        .toggle-checkbox:checked + .toggle-label { background-color: #14b8a6; }
     </style>
 </head>
 <body class="bg-gray-900 text-white">
@@ -31,13 +34,23 @@
     </div>
 
     <div id="ui-container" class="fixed top-0 left-0 w-full p-4 z-10 bg-gradient-to-b from-black/70 to-transparent">
-        <div class="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div class="max-w-5xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
             <!-- Kontrol Mode -->
             <div class="flex items-center bg-gray-800 rounded-lg p-1 space-x-1">
                 <button id="mode-object" class="mode-btn px-4 py-2 text-sm font-medium rounded-md btn-active">Deteksi Objek</button>
                 <button id="mode-roi-box" class="mode-btn px-4 py-2 text-sm font-medium rounded-md">Zona Kotak</button>
                 <button id="mode-roi-line" class="mode-btn px-4 py-2 text-sm font-medium rounded-md">Zona Garis</button>
             </div>
+            
+            <!-- FITUR BARU: Toggle Filter Termal -->
+            <div class="flex items-center space-x-3 bg-gray-800 rounded-lg p-2">
+                <span class="font-medium text-sm text-gray-300">Filter Termal</span>
+                <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                    <input type="checkbox" name="thermal-toggle" id="thermal-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer"/>
+                    <label for="thermal-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-600 cursor-pointer"></label>
+                </div>
+            </div>
+
             <!-- Status & Info -->
             <div id="status-box" class="text-center bg-gray-800/80 p-2 rounded-lg">
                 <p id="status" class="text-lg font-semibold text-teal-300">Menunggu kamera...</p>
@@ -47,6 +60,7 @@
     </div>
     
     <script>
+        // ... (semua variabel DOM dari sebelumnya) ...
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -55,27 +69,29 @@
         const statusEl = document.getElementById('status');
         const calibrationInfoEl = document.getElementById('calibration-info');
         const modeButtons = document.querySelectorAll('.mode-btn');
+        const thermalToggle = document.getElementById('thermal-toggle');
 
         let model = null;
-        let currentMode = 'object'; // 'object', 'roi-box', 'roi-line'
+        let currentMode = 'object';
         let roiBox = null;
         let roiLine = null;
         let isDrawing = false;
         let startPoint = {};
         
-        // --- Logika Kalibrasi & Pengukuran ---
+        // --- State untuk Fitur Baru ---
+        let isThermalModeActive = false;
+        
+        // ... (semua fungsi dari sebelumnya: kalibrasi, kategori, setup, dll.) ...
         let pixelsPerCm = null;
         const AVG_FACE_WIDTH_CM = 14.0;
-
         const animalClasses = ['bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe'];
         
-        function getCategory(className) {
+        function getCategory(className) { /* ... (fungsi sama) ... */
             if (className === 'person') return { name: 'Person', color: '#14b8a6' }; // Teal
             if (animalClasses.includes(className)) return { name: 'Animal', color: '#f59e0b' }; // Amber
             return { name: 'Equipment', color: '#6366f1' }; // Indigo
         }
-
-        async function setupCamera() {
+        async function setupCamera() { /* ... (fungsi sama) ... */ 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { width: 1280, height: 720, facingMode: 'user' },
@@ -83,23 +99,18 @@
                 });
                 video.srcObject = stream;
                 return new Promise(resolve => {
-                    video.onloadedmetadata = () => {
-                        resolve(video);
-                    };
+                    video.onloadedmetadata = () => { resolve(video); };
                 });
             } catch (err) {
                 loaderText.innerText = "Error: Gagal mengakses kamera. Mohon berikan izin.";
-                console.error(err);
             }
         }
-        
-        async function loadModel() {
+        async function loadModel() { /* ... (fungsi sama) ... */
             loaderText.innerText = "Memuat model deteksi objek...";
             model = await cocoSsd.load();
             loaderText.innerText = "Model berhasil dimuat!";
         }
-
-        function switchMode(newMode) {
+        function switchMode(newMode) { /* ... (fungsi sama) ... */
             currentMode = newMode;
             modeButtons.forEach(btn => {
                 btn.classList.remove('btn-active');
@@ -114,31 +125,81 @@
             }
         }
 
+        // --- FUNGSI BARU: Menerapkan Filter Termal ---
+        function applyThermalFilter(imageData) {
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                // Hitung kecerahan piksel (rata-rata)
+                const brightness = (r + g + b) / 3;
+
+                // Mapelkan kecerahan ke warna termal
+                const thermalColor = mapBrightnessToThermalColor(brightness);
+                data[i] = thermalColor.r;
+                data[i+1] = thermalColor.g;
+                data[i+2] = thermalColor.b;
+            }
+        }
+
+        function mapBrightnessToThermalColor(brightness) {
+            const t = brightness / 255;
+            let r=0, g=0, b=0;
+
+            if (t < 0.25) { // Dingin (Biru ke Ungu)
+                r = 0;
+                g = t * 4 * 255; // Dari 0 ke 255
+                b = 255;
+            } else if (t < 0.5) { // Sedang (Hijau ke Kuning)
+                r = (t - 0.25) * 4 * 255; // Dari 0 ke 255
+                g = 255;
+                b = 255 - r;
+            } else if (t < 0.75) { // Hangat (Kuning ke Merah)
+                r = 255;
+                g = 255 - (t - 0.5) * 4 * 255; // Dari 255 ke 0
+                b = 0;
+            } else { // Panas (Merah ke Putih)
+                r = 255;
+                g = (t - 0.75) * 4 * 255; // Dari 0 ke 255
+                b = g;
+            }
+            return { r, g, b };
+        }
+        
+        // --- MODIFIKASI: Loop Deteksi Utama ---
         async function detectionLoop() {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
+            // 1. Selalu gambar video asli ke canvas
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+            // 2. JIKA mode termal aktif, proses piksel dan gambar ulang
+            if (isThermalModeActive) {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                applyThermalFilter(imageData);
+                ctx.putImageData(imageData, 0, 0);
+            }
+
+            // 3. Lanjutkan dengan deteksi objek (model mendeteksi dari elemen <video>, bukan dari canvas yang sudah difilter)
             if (model && currentMode === 'object') {
                 statusEl.textContent = 'Mendeteksi Objek...';
                 const predictions = await model.detect(video);
                 
-                // Kalibrasi otomatis jika wajah terdeteksi
                 const personPrediction = predictions.find(p => p.class === 'person');
                 if (personPrediction) {
-                    const personWidthPixels = personPrediction.bbox[2];
-                    pixelsPerCm = personWidthPixels / AVG_FACE_WIDTH_CM;
+                    pixelsPerCm = personPrediction.bbox[2] / AVG_FACE_WIDTH_CM;
                     calibrationInfoEl.textContent = `Kalibrasi OK! 1cm ≈ ${pixelsPerCm.toFixed(2)}px`;
                 }
 
                 drawPredictions(predictions);
             }
 
+            // ... (sisa logika untuk menggambar ROI tidak berubah) ...
             if (roiBox) {
                 ctx.strokeStyle = 'yellow';
                 ctx.lineWidth = 4;
                 ctx.strokeRect(roiBox.x, roiBox.y, roiBox.w, roiBox.h);
-                // Logika deteksi gerakan dalam kotak bisa ditambahkan di sini
             }
             if (roiLine) {
                 ctx.strokeStyle = 'yellow';
@@ -147,34 +208,29 @@
                 ctx.moveTo(roiLine.x1, roiLine.y1);
                 ctx.lineTo(roiLine.x2, roiLine.y2);
                 ctx.stroke();
-                // Logika deteksi gerakan di garis bisa ditambahkan di sini
             }
 
             requestAnimationFrame(detectionLoop);
         }
 
-        function drawPredictions(predictions) {
-            predictions.forEach(p => {
+        function drawPredictions(predictions) { /* ... (fungsi sama) ... */
+             predictions.forEach(p => {
                 const [x, y, width, height] = p.bbox;
                 const category = getCategory(p.class);
                 
-                // Draw Bounding Box
                 ctx.strokeStyle = category.color;
                 ctx.lineWidth = 4;
                 ctx.strokeRect(x, y, width, height);
 
-                // Draw Label Background
                 ctx.fillStyle = category.color;
                 const text = `${category.name} (${Math.round(p.score * 100)}%)`;
                 ctx.font = '16px Inter, sans-serif';
                 const textWidth = ctx.measureText(text).width;
                 ctx.fillRect(x, y, textWidth + 10, 25);
                 
-                // Draw Label Text
                 ctx.fillStyle = '#ffffff';
                 ctx.fillText(text, x + 5, y + 18);
 
-                // Draw Measurement if calibrated
                 if (pixelsPerCm) {
                     const widthCm = (width / pixelsPerCm).toFixed(1);
                     const heightCm = (height / pixelsPerCm).toFixed(1);
@@ -189,50 +245,20 @@
             });
         }
         
-        // --- Event Listeners untuk Menggambar Zona ---
-        function handleMouseDown(e) {
-            if (currentMode === 'object') return;
-            isDrawing = true;
-            startPoint = { x: e.offsetX, y: e.offsetY };
-        }
-
-        function handleMouseMove(e) {
-            if (!isDrawing) return;
-            const endPoint = { x: e.offsetX, y: e.offsetY };
-            if (currentMode === 'roi-box') {
-                roiBox = {
-                    x: Math.min(startPoint.x, endPoint.x),
-                    y: Math.min(startPoint.y, endPoint.y),
-                    w: Math.abs(startPoint.x - endPoint.x),
-                    h: Math.abs(startPoint.y - endPoint.y)
-                };
-            } else if (currentMode === 'roi-line') {
-                roiLine = { x1: startPoint.x, y1: startPoint.y, x2: endPoint.x, y2: endPoint.y };
-            }
-        }
-
-        function handleMouseUp() {
-            if (!isDrawing) return;
-            isDrawing = false;
-            if (roiBox) statusEl.textContent = 'Zona Kotak Ditetapkan';
-            if (roiLine) {
-                 statusEl.textContent = 'Zona Garis Ditetapkan';
-                 // Ukur jarak garis jika terkalibrasi
-                 if (pixelsPerCm) {
-                    const dx = roiLine.x2 - roiLine.x1;
-                    const dy = roiLine.y2 - roiLine.y1;
-                    const distPixels = Math.sqrt(dx*dx + dy*dy);
-                    const distCm = (distPixels / pixelsPerCm).toFixed(1);
-                    statusEl.textContent = `Zona Garis: Estimasi ${distCm} cm`;
-                 }
-            }
-        }
+        // ... (semua event listener untuk menggambar ROI tidak berubah) ...
+        function handleMouseDown(e) { /*...*/ if (currentMode === 'object') return; isDrawing = true; startPoint = { x: e.offsetX, y: e.offsetY }; }
+        function handleMouseMove(e) { /*...*/ if (!isDrawing) return; const endPoint = { x: e.offsetX, y: e.offsetY }; if (currentMode === 'roi-box') { roiBox = { x: Math.min(startPoint.x, endPoint.x), y: Math.min(startPoint.y, endPoint.y), w: Math.abs(startPoint.x - endPoint.x), h: Math.abs(startPoint.y - endPoint.y) }; } else if (currentMode === 'roi-line') { roiLine = { x1: startPoint.x, y1: startPoint.y, x2: endPoint.x, y2: endPoint.y }; } }
+        function handleMouseUp() { /*...*/ if (!isDrawing) return; isDrawing = false; if (roiBox) statusEl.textContent = 'Zona Kotak Ditetapkan'; if (roiLine) { statusEl.textContent = 'Zona Garis Ditetapkan'; if (pixelsPerCm) { const dx = roiLine.x2 - roiLine.x1; const dy = roiLine.y2 - roiLine.y1; const distPixels = Math.sqrt(dx*dx + dy*dy); const distCm = (distPixels / pixelsPerCm).toFixed(1); statusEl.textContent = `Zona Garis: Estimasi ${distCm} cm`; } } }
 
         canvas.addEventListener('mousedown', handleMouseDown);
         canvas.addEventListener('mousemove', handleMouseMove);
         canvas.addEventListener('mouseup', handleMouseUp);
-        
         modeButtons.forEach(btn => btn.addEventListener('click', () => switchMode(btn.id.replace('mode-', '').replace('-', '_'))));
+
+        // --- Event Listener untuk Toggle Termal ---
+        thermalToggle.addEventListener('change', (e) => {
+            isThermalModeActive = e.target.checked;
+        });
 
         // --- Inisialisasi Aplikasi ---
         async function main() {
